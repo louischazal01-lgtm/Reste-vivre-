@@ -21,6 +21,23 @@ const ENFANTS_OPTS = [
   { id: 2, label: "2" }, { id: 3, label: "3+" },
 ];
 
+// ─── LISTE EMAILS JETABLES (validation côté client) ─────
+const DISPOSABLE_DOMAINS = [
+  "yopmail.com", "yopmail.fr", "mailinator.com", "tempmail.com",
+  "10minutemail.com", "guerrillamail.com", "throwawaymail.com",
+  "maildrop.cc", "sharklasers.com", "getnada.com", "trashmail.com",
+  "fakemail.net", "fakeinbox.com", "discard.email", "tempmail.io",
+  "temp-mail.org", "dispostable.com", "mohmal.com", "mailsac.com",
+  "inboxkitten.com",
+];
+
+function isDisposableEmail(email) {
+  if (!email) return false;
+  const domain = email.toLowerCase().split("@")[1];
+  if (!domain) return false;
+  return DISPOSABLE_DOMAINS.some(d => domain === d || domain.endsWith("." + d));
+}
+
 // ─── CALCULATION ENGINE (2026 DATA) ─────────────────────
 
 function getLPPRate(age) {
@@ -503,21 +520,10 @@ function Step1({ data, setData, onNext }) {
           </p>
           <p style={{
             fontSize: 14, color: "#991B1B", lineHeight: 1.65,
-            fontFamily: "var(--fb)", fontWeight: 700, margin: "0 0 16px",
+            fontFamily: "var(--fb)", fontWeight: 700, margin: 0,
           }}>
-            <strong>Le risque :</strong> Votre contrat est illégal et l'administration peut refuser votre Permis G. Ne signez rien avant notre session stratégique.
+            <strong>Le risque :</strong> Votre contrat pourrait être illégal. Continuez la simulation — vous recevrez par email un diagnostic complet et les étapes à suivre pour sécuriser votre projet.
           </p>
-          <a href="https://calendly.com/esprraphael/strategie-de-reussite-en-tant-que-frontalier-suisse" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", display: "block" }}>
-            <div style={{
-              padding: "14px 20px", borderRadius: 14,
-              background: "#DC2626", color: "#fff",
-              fontSize: 15, fontWeight: 800, fontFamily: "var(--fh)",
-              textAlign: "center", cursor: "pointer",
-              boxShadow: "0 4px 16px rgba(220,38,38,0.3)",
-            }}>
-              🛡 Sécuriser mon contrat avec Raphaël — 45 min
-            </div>
-          </a>
         </div>
       )}
 
@@ -531,8 +537,8 @@ function Step1({ data, setData, onNext }) {
         )}
       </Field>
       <div style={{ marginTop: 28 }}>
-        <Btn onClick={(valid && !isDumping) ? onNext : null} disabled={!valid || isDumping}>
-          {isDumping ? "⛔ Résultats bloqués — Dumping détecté" : "Continuer →"}
+        <Btn onClick={valid ? onNext : null} disabled={!valid}>
+          Continuer →
         </Btn>
       </div>
     </Layout>
@@ -612,12 +618,12 @@ function Step3({ data, setData, onNext }) {
         }}>
           {data.sante === "lamal" ? (
             <>
-              <strong style={{ color: "#FF6B35" }}>LAMal Frontalier (Helsana 2026) :</strong> Prime fixe de 200 CHF/mois, indépendante du revenu. Libre choix du médecin en Suisse et en France. 
+              <strong style={{ color: "#FF6B35" }}>LAMal Frontalier (Helsana 2026) :</strong> Prime fixe de 200 CHF/mois, indépendante du revenu. Libre choix du médecin en Suisse et en France.
               {diff > 0 && <span> Vous économisez <strong>{fmt(diff * 12)} CHF/an</strong> vs la CMU.</span>}
             </>
           ) : (
             <>
-              <strong style={{ color: "#FF6B35" }}>CMU (PUMa) :</strong> Cotisation proportionnelle à 8% du Revenu Fiscal de Référence. 
+              <strong style={{ color: "#FF6B35" }}>CMU (PUMa) :</strong> Cotisation proportionnelle à 8% du Revenu Fiscal de Référence.
               {diff < 0 && <span> Vous économisez <strong>{fmt(Math.abs(diff) * 12)} CHF/an</strong> vs la LAMal.</span>}
               {diff >= 0 && <span> Attention : plus coûteuse que la LAMal pour votre niveau de revenu.</span>}
             </>
@@ -632,7 +638,7 @@ function Step3({ data, setData, onNext }) {
   );
 }
 
-function Results({ data, onNext }) {
+function Results({ data, onNext, emailSent }) {
   const r = computeResults(data);
   const [show, setShow] = useState(false);
   useEffect(() => { setTimeout(() => setShow(true), 200); }, []);
@@ -644,6 +650,28 @@ function Results({ data, onNext }) {
       transition: "all 0.6s ease",
     }}>
       <Progress step={4} total={6} />
+
+      {/* Bandeau "email envoyé" */}
+      {emailSent && (
+        <div style={{
+          padding: "14px 16px", marginBottom: 20,
+          background: "linear-gradient(135deg, #F0FDF4, #F7FFF9)",
+          border: "2px solid #BBF7D0", borderRadius: 14,
+          display: "flex", alignItems: "flex-start", gap: 10,
+          animation: "slideUp 0.5s ease",
+        }}>
+          <span style={{ fontSize: 20, flexShrink: 0 }}>📧</span>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: "#166534", fontFamily: "var(--fb)", marginBottom: 2 }}>
+              Tes résultats t'ont aussi été envoyés par email
+            </div>
+            <div style={{ fontSize: 13, color: "#16A34A", fontFamily: "var(--fb)", fontWeight: 600, lineHeight: 1.5 }}>
+              Pense à vérifier tes spams si tu ne le vois pas. Marque-le comme "non-spam" pour ne rien manquer.
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ textAlign: "center", marginBottom: 24 }}>
         <span style={{
           display: "inline-block", padding: "6px 16px",
@@ -759,10 +787,13 @@ function LeadCapture({ data, onSubmit }) {
   const [prenom, setPrenom] = useState("");
   const [nom, setNom] = useState("");
   const [email, setEmail] = useState("");
+  const [newsletter, setNewsletter] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const validEmailFormat = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const isDisposable = email && validEmailFormat && isDisposableEmail(email);
+  const validEmail = validEmailFormat && !isDisposable;
   const valid = prenom.trim().length > 1 && nom.trim().length > 1 && validEmail;
 
   const inputStyle = {
@@ -777,18 +808,16 @@ function LeadCapture({ data, onSubmit }) {
   const onFocus = e => { e.target.style.borderColor = "#FF6B35"; e.target.style.boxShadow = "0 0 0 4px rgba(255,107,53,0.1)"; };
   const onBlur = e => { e.target.style.borderColor = "#e2e8f0"; e.target.style.boxShadow = "none"; };
 
-  // ─── INTÉGRATION BREVO ───────────────────────────────
   const handleSubmit = async () => {
     if (!valid || loading) return;
     setLoading(true);
     setError("");
 
-    // Calcul des résultats pour l'email
     const fullData = { ...data, prenom, nom, email };
     const r = computeResults(fullData);
 
     try {
-      await fetch("/api/lead", {
+      const response = await fetch("/api/lead", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -799,15 +828,29 @@ function LeadCapture({ data, onSubmit }) {
           canton: r.canton,
           charges_totales: String(r.totalCharges),
           reste_a_vivre: String(r.resteAVivre),
+          newsletter_optin: newsletter,
         }),
       });
-      // Qu'importe le résultat de l'API, on passe à l'écran suivant
-      // (on ne bloque pas l'UX si l'email ne part pas)
-      onSubmit({ prenom, nom, email });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        // Erreur serveur (email jetable, format invalide, etc.)
+        if (result.error === "disposable") {
+          setError(result.message || "Merci d'utiliser une adresse email personnelle.");
+        } else {
+          setError(result.message || "Une erreur est survenue. Réessayez dans un instant.");
+        }
+        setLoading(false);
+        return;
+      }
+
+      // Succès : on passe à l'écran suivant avec indication email envoyé
+      onSubmit({ prenom, nom, email, emailSent: true });
     } catch (err) {
       console.error("Erreur envoi lead:", err);
-      // On laisse quand même passer
-      onSubmit({ prenom, nom, email });
+      // Fallback : on laisse quand même passer pour ne pas bloquer l'UX
+      onSubmit({ prenom, nom, email, emailSent: false });
     } finally {
       setLoading(false);
     }
@@ -864,14 +907,54 @@ function LeadCapture({ data, onSubmit }) {
 
       <Field label="Adresse e-mail">
         <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="prenom.nom@email.com" style={inputStyle} onFocus={onFocus} onBlur={onBlur} />
+        {isDisposable && (
+          <div style={{
+            marginTop: 8, padding: "10px 14px",
+            background: "#FEF2F2", border: "2px solid #FECACA",
+            borderRadius: 12, fontSize: 13, color: "#DC2626",
+            fontFamily: "var(--fb)", fontWeight: 600,
+            display: "flex", alignItems: "flex-start", gap: 8,
+          }}>
+            <span style={{ flexShrink: 0 }}>⚠️</span>
+            <span>Les emails jetables ne sont pas acceptés. Utilise une adresse personnelle (Gmail, Outlook, iCloud, Yahoo…).</span>
+          </div>
+        )}
       </Field>
+
+      {/* Checkbox newsletter (optionnelle, non pré-cochée) */}
+      <label style={{
+        display: "flex", alignItems: "flex-start", gap: 10,
+        padding: "14px 16px", background: "#F8FAFC",
+        borderRadius: 14, border: "2px solid #f1f5f9",
+        marginBottom: 18, cursor: "pointer",
+        fontFamily: "var(--fb)",
+      }}>
+        <input
+          type="checkbox"
+          checked={newsletter}
+          onChange={e => setNewsletter(e.target.checked)}
+          style={{
+            width: 20, height: 20, marginTop: 2,
+            accentColor: "#FF6B35",
+            cursor: "pointer", flexShrink: 0,
+          }}
+        />
+        <span style={{ fontSize: 13, color: "#475569", fontWeight: 600, lineHeight: 1.5 }}>
+          Je souhaite recevoir les conseils exclusifs de Raphaël pour réussir mon projet frontalier (1 email/semaine, désinscription en 1 clic).
+        </span>
+      </label>
 
       <Btn onClick={handleSubmit} disabled={!valid || loading}>
         {loading ? "Envoi en cours..." : "Voir mes résultats →"}
       </Btn>
 
       {error && (
-        <div style={{ marginTop: 12, padding: 12, background: "#FEF2F2", borderRadius: 12, color: "#DC2626", fontSize: 13, fontFamily: "var(--fb)", fontWeight: 600, textAlign: "center" }}>
+        <div style={{
+          marginTop: 12, padding: "12px 14px",
+          background: "#FEF2F2", border: "2px solid #FECACA",
+          borderRadius: 12, color: "#DC2626", fontSize: 13,
+          fontFamily: "var(--fb)", fontWeight: 600, textAlign: "center",
+        }}>
           {error}
         </div>
       )}
@@ -896,6 +979,9 @@ function Final({ data }) {
   const vc = verdictColors[r.verdict];
   const needsCTA = r.verdict === "rouge" || r.verdict === "orange";
 
+  // Alerte supplémentaire si dumping détecté (récupéré ici puisque plus bloqué en Step1)
+  const dumpingAlert = r.isDumping;
+
   return (
     <div style={{
       padding: "32px 20px", maxWidth: 520, margin: "0 auto",
@@ -903,6 +989,25 @@ function Final({ data }) {
       transition: "all 0.7s ease",
     }}>
       <Progress step={6} total={6} />
+
+      {/* Alerte dumping en haut (avant le verdict) */}
+      {dumpingAlert && (
+        <div style={{
+          padding: 18, background: "#FEF2F2",
+          border: "2.5px solid #FCA5A5", borderRadius: 18,
+          marginBottom: 20, animation: "slideUp 0.4s ease",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <span style={{ fontSize: 22 }}>🚨</span>
+            <span style={{ fontSize: 15, fontWeight: 900, color: "#DC2626", fontFamily: "var(--fh)" }}>
+              Alerte : Dumping Salarial Détecté
+            </span>
+          </div>
+          <p style={{ fontSize: 13, color: "#991B1B", lineHeight: 1.6, fontFamily: "var(--fb)", fontWeight: 600, margin: 0 }}>
+            Votre rémunération horaire ({r.salaireHoraire.toFixed(2)} CHF/h) est inférieure au minimum légal de {r.canton} ({r.smicHoraire} CHF/h). À vérifier impérativement avec un expert avant signature.
+          </p>
+        </div>
+      )}
 
       <div style={{ textAlign: "center", marginBottom: 28 }}>
         <div style={{
@@ -1006,7 +1111,16 @@ function Final({ data }) {
         borderRadius: 18, marginBottom: 24,
         border: "2px solid #f1f5f9",
       }}>
-        {needsCTA ? (
+        {dumpingAlert ? (
+          <>
+            <p style={{ fontSize: 15, color: "#1e293b", lineHeight: 1.7, fontFamily: "var(--fb)", fontWeight: 600, margin: "0 0 12px" }}>
+              <strong style={{ color: "#DC2626" }}>Votre contrat présente un risque de dumping salarial.</strong> C'est une situation à ne surtout pas prendre à la légère — l'administration peut refuser votre Permis G.
+            </p>
+            <p style={{ fontSize: 14, color: "#64748b", lineHeight: 1.6, fontFamily: "var(--fb)", fontWeight: 500, margin: 0 }}>
+              En 45 min, nous analysons votre contrat et définissons la stratégie pour sécuriser votre projet avant signature.
+            </p>
+          </>
+        ) : needsCTA ? (
           <>
             <p style={{ fontSize: 15, color: "#1e293b", lineHeight: 1.7, fontFamily: "var(--fb)", fontWeight: 600, margin: "0 0 12px" }}>
               <strong style={{ color: vc.accent }}>Votre budget est {r.verdict === "rouge" ? "trop serré" : "fragile"}.</strong> Avant de vous lancer, il est essentiel d'optimiser chaque poste de dépense et de valider votre stratégie avec un expert du marché suisse.
@@ -1021,18 +1135,21 @@ function Final({ data }) {
               <strong style={{ color: "#FF6B35" }}>Mais attention :</strong> la théorie ne remplace pas la stratégie. Le marché caché suisse ne s'offre qu'aux profils <em>parfaitement préparés</em>.
             </p>
             <p style={{ fontSize: 14, color: "#64748b", lineHeight: 1.6, fontFamily: "var(--fb)", fontWeight: 500, margin: 0 }}>
-              Pendant 45 min, nous analyserons votre éligibilité réelle, votre stratégie de négociation salariale et la viabilité de votre projet frontalier.
+              Pendant 45 min, nous analysons votre éligibilité réelle, votre stratégie de négociation salariale et la viabilité de votre projet frontalier.
             </p>
           </>
         )}
       </div>
 
       <a href="https://calendly.com/esprraphael/strategie-de-reussite-en-tant-que-frontalier-suisse" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", display: "block" }}>
-        <Btn style={needsCTA ? {
+        <Btn style={dumpingAlert ? {
+          background: "linear-gradient(135deg, #DC2626, #EF4444)",
+          boxShadow: "0 4px 20px rgba(220,38,38,0.35)",
+        } : needsCTA ? {
           background: r.verdict === "rouge" ? "linear-gradient(135deg, #DC2626, #EF4444)" : "linear-gradient(135deg, #D97706, #F59E0B)",
           boxShadow: r.verdict === "rouge" ? "0 4px 20px rgba(220,38,38,0.35)" : "0 4px 20px rgba(217,119,6,0.35)",
         } : {}}>
-          {needsCTA ? "🛡 Sécuriser mon budget avec Raphaël — 45 min" : "🗓 Réserver ma Session Stratégique de 45 minutes"}
+          {dumpingAlert ? "🛡 Sécuriser mon contrat avec Raphaël — 45 min" : needsCTA ? "🛡 Sécuriser mon budget avec Raphaël — 45 min" : "🗓 Réserver ma Session Stratégique de 45 minutes"}
         </Btn>
       </a>
 
@@ -1078,6 +1195,7 @@ function Layout({ step, title, sub, children }) {
 
 export default function App() {
   const [screen, setScreen] = useState("accueil");
+  const [emailSent, setEmailSent] = useState(false);
   const [data, setData] = useState({
     salaire: "", canton: "", age: "",
     situation: "", enfants: 0, teletravail: 0,
@@ -1135,8 +1253,8 @@ export default function App() {
         {screen === "step1" && <Step1 data={data} setData={setData} onNext={() => goTo("step2")} />}
         {screen === "step2" && <Step2 data={data} setData={setData} onNext={() => goTo("step3")} />}
         {screen === "step3" && <Step3 data={data} setData={setData} onNext={() => goTo("leadcapture")} />}
-        {screen === "leadcapture" && <LeadCapture data={data} onSubmit={({ prenom, nom, email }) => { setData({ ...data, prenom, nom, email }); goTo("results"); }} />}
-        {screen === "results" && <Results data={data} onNext={() => goTo("final")} />}
+        {screen === "leadcapture" && <LeadCapture data={data} onSubmit={({ prenom, nom, email, emailSent: es }) => { setData({ ...data, prenom, nom, email }); setEmailSent(es); goTo("results"); }} />}
+        {screen === "results" && <Results data={data} emailSent={emailSent} onNext={() => goTo("final")} />}
         {screen === "final" && <Final data={data} />}
       </div>
     </>
