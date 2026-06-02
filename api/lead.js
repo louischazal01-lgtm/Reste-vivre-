@@ -156,7 +156,7 @@ export default async function handler(req, res) {
     if (!emailRes.ok) {
       const errText = await emailRes.text();
       console.error("Erreur envoi email Brevo:", emailRes.status, errText);
-      return res.status(500).json({ error: "Erreur lors de l'envoi de l'email", detail: errText, status: emailRes.status });
+      return res.status(500).json({ error: "Erreur lors de l'envoi de l'email" });
     }
 
     return res.status(200).json({
