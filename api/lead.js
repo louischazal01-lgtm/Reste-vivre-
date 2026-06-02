@@ -75,6 +75,7 @@ export default async function handler(req, res) {
   }
 
   const BREVO_API_KEY = process.env.BREVO_API_KEY;
+  const RAPH_BRAIN_URL = "https://raphbrain.duckdns.org/api/leads";
   const LIST_ID_SIMULATEUR = 3;
   const LIST_ID_NEWSLETTER = 4;
   const TEMPLATE_ID = 1;
@@ -88,6 +89,21 @@ export default async function handler(req, res) {
   if (newsletter_optin === true) {
     listIds.push(LIST_ID_NEWSLETTER);
   }
+
+  // Sync Raph Brain DB (non-bloquant)
+  fetch(RAPH_BRAIN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email, prenom, nom,
+      salaire_brut: parseInt(salaire_brut) || null,
+      canton,
+      charges_totales: parseInt(charges_totales) || null,
+      reste_a_vivre: parseInt(reste_a_vivre) || null,
+      newsletter_optin: newsletter_optin === true,
+      source: "simulateur",
+    }),
+  }).catch(() => {});
 
   try {
     const contactRes = await fetch("https://api.brevo.com/v3/contacts", {
