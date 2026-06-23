@@ -1,7 +1,7 @@
 // api/lead.js
 // Fonction serverless Vercel : reçoit les données du simulateur,
 // crée/met à jour le contact dans Brevo, l'ajoute à la liste "Frontaliers - Simulateur",
-// envoie l'email transactionnel, et ajoute à la newsletter si opt-in.
+// envoie l'email transactionnel de résultat, et ajoute à la newsletter si opt-in.
 
 // ─── LISTE DE DOMAINES D'EMAILS JETABLES ─────────────────
 const DISPOSABLE_EMAIL_DOMAINS = new Set([
@@ -38,6 +38,13 @@ function isDisposableEmail(email) {
   return DISPOSABLE_EMAIL_DOMAINS.has(domain);
 }
 
+// Petit utilitaire de formatage EUR pour les params du template
+function fmtEUR(n) {
+  const v = parseInt(n);
+  if (isNaN(v)) return "";
+  return new Intl.NumberFormat("fr-FR").format(v);
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -57,8 +64,18 @@ export default async function handler(req, res) {
     nom,
     salaire_brut,
     canton,
-    charges_totales,
-    reste_a_vivre,
+    regime,           // "source" | "france"
+    net_mensuel,      // EUR
+    sante_type,       // "lamal" | "cmu"
+    sante_montant,    // EUR/mois (option choisie)
+    lamal,            // EUR/mois
+    cmu,              // EUR/mois
+    loyer,            // EUR
+    transport,        // EUR
+    courses,          // EUR
+    charges_totales,  // EUR
+    reste_a_vivre,    // EUR
+    verdict,          // "vert" | "orange" | "rouge"
     newsletter_optin,
   } = req.body || {};
 
@@ -90,6 +107,28 @@ export default async function handler(req, res) {
     listIds.push(LIST_ID_NEWSLETTER);
   }
 
+  // Libellés lisibles pour le template
+  const santeLabel = sante_type === "lamal" ? "LAMal (assurance suisse)"
+                   : sante_type === "cmu" ? "CMU (assurance française)" : "—";
+  const regimeLabel = regime === "source"
+    ? "Impôt à la source (prélevé en Suisse)"
+    : "Imposition en France (accord de 1983)";
+  const verdictLabel = verdict === "rouge" ? "Projet sous tension"
+                     : verdict === "orange" ? "Projet à sécuriser"
+                     : "Projet solide";
+  // Détermine quelle assurance est la moins chère pour le conseil
+  const lamalN = parseInt(lamal), cmuN = parseInt(cmu);
+  let santeConseil = "";
+  if (!isNaN(lamalN) && !isNaN(cmuN)) {
+    if (cmuN < lamalN) {
+      santeConseil = `Dans ton cas, la CMU est moins chère que la LAMal d'environ ${fmtEUR(lamalN - cmuN)} €/mois, soit ${fmtEUR((lamalN - cmuN) * 12)} €/an.`;
+    } else if (lamalN < cmuN) {
+      santeConseil = `Dans ton cas, la LAMal est moins chère que la CMU d'environ ${fmtEUR(cmuN - lamalN)} €/mois, soit ${fmtEUR((cmuN - lamalN) * 12)} €/an.`;
+    } else {
+      santeConseil = "Dans ton cas, LAMal et CMU sont à un niveau comparable.";
+    }
+  }
+
   // Sync Raph Brain DB (non-bloquant)
   fetch(RAPH_BRAIN_URL, {
     method: "POST",
@@ -98,8 +137,13 @@ export default async function handler(req, res) {
       email, prenom, nom,
       salaire_brut: parseInt(salaire_brut) || null,
       canton,
+      regime: regime || null,
+      net_mensuel: parseInt(net_mensuel) || null,
+      sante_type: sante_type || null,
+      sante_montant: parseInt(sante_montant) || null,
       charges_totales: parseInt(charges_totales) || null,
       reste_a_vivre: parseInt(reste_a_vivre) || null,
+      verdict: verdict || null,
       newsletter_optin: newsletter_optin === true,
       source: "simulateur",
     }),
@@ -145,10 +189,21 @@ export default async function handler(req, res) {
         templateId: TEMPLATE_ID,
         params: {
           prenom: prenom || "",
-          salaire_brut: salaire_brut || "",
+          salaire_brut: fmtEUR(salaire_brut),
           canton: canton || "",
-          charges_totales: charges_totales || "",
-          reste_a_vivre: reste_a_vivre || "",
+          regime_label: regimeLabel,
+          net_mensuel: fmtEUR(net_mensuel),
+          sante_label: santeLabel,
+          sante_montant: fmtEUR(sante_montant),
+          lamal: fmtEUR(lamal),
+          cmu: fmtEUR(cmu),
+          sante_conseil: santeConseil,
+          loyer: fmtEUR(loyer),
+          transport: fmtEUR(transport),
+          courses: fmtEUR(courses),
+          charges_totales: fmtEUR(charges_totales),
+          reste_a_vivre: fmtEUR(reste_a_vivre),
+          verdict_label: verdictLabel,
         },
       }),
     });
