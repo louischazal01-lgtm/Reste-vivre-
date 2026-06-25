@@ -2,6 +2,7 @@
 // Fonction serverless Vercel : reçoit les données du simulateur,
 // crée/met à jour le contact dans Brevo, l'ajoute à la liste "Frontaliers - Simulateur",
 // envoie l'email transactionnel de résultat, et ajoute à la newsletter si opt-in.
+import { promises as dns } from "dns";
 
 // ─── LISTE DE DOMAINES D'EMAILS JETABLES ─────────────────
 const DISPOSABLE_EMAIL_DOMAINS = new Set([
@@ -29,13 +30,70 @@ const DISPOSABLE_EMAIL_DOMAINS = new Set([
   "owlymail.com", "inboxkitten.com",
   "mailsac.com", "tempinbox.com",
 ]);
-
 function isDisposableEmail(email) {
   if (!email || typeof email !== "string") return false;
   const parts = email.toLowerCase().split("@");
   if (parts.length !== 2) return false;
   const domain = parts[1];
   return DISPOSABLE_EMAIL_DOMAINS.has(domain);
+}
+
+// ─── VÉRIF QUE LE DOMAINE EMAIL EXISTE VRAIMENT (fail-open) ──────────────
+// Rejette les domaines inventés (ejsjd.com, dueu.com, qwdqwd.ch...).
+// En cas d'erreur DNS transitoire ou de timeout : on LAISSE PASSER (on ne perd jamais un vrai lead).
+async function isRealEmailDomain(email) {
+  const domain = (String(email).split("@")[1] || "").toLowerCase();
+  if (!domain) return false;
+
+  const lookup = (async () => {
+    try {
+      const mx = await dns.resolveMx(domain);
+      if (Array.isArray(mx) && mx.length > 0) return true;
+      // MX vide → fallback A ci-dessous
+    } catch (err) {
+      // ENOTFOUND/ENODATA = pas de MX → on tente le fallback A
+      if (err.code !== "ENOTFOUND" && err.code !== "ENODATA") return true; // erreur transitoire → fail-open
+    }
+    try {
+      const a = await dns.resolve(domain);
+      return Array.isArray(a) && a.length > 0;
+    } catch (err) {
+      if (err.code === "ENOTFOUND" || err.code === "ENODATA") return false; // domaine n'existe pas → rejet
+      return true; // erreur transitoire → fail-open
+    }
+  })();
+
+  // Sécurité : 3s max, sinon fail-open
+  return Promise.race([
+    lookup,
+    new Promise((res) => setTimeout(() => res(true), 3000)),
+  ]);
+}
+
+// ─── VÉRIF "NOM PLAUSIBLE" (permissive) ─────────────────────────────────
+// Rejette les noms bidons (Hj Hh, Test Test, To To, Xx Yy...) sans casser
+// les vrais noms (accents, traits d'union, apostrophes, noms courts type "Ng Wu").
+const NAME_VOWELS = /[aeiouyàâäéèêëïîôöùûüÿæœ]/i;
+const NAME_ALLOWED = /^[\p{L}][\p{L} .'’-]*$/u; // lettres de toute langue + espace . ' ’ -
+const NAME_BLOCKLIST = new Set([
+  "test", "testtest", "asdf", "qwerty", "azerty", "abc", "abcd", "xxx",
+  "aaa", "aaaa", "john", "smith", "johnsmith", "toto", "tata", "titi",
+  "nom", "prenom", "name",
+]);
+function looksLikeRealName(prenom, nom) {
+  const p = String(prenom || "").trim();
+  const n = String(nom || "").trim();
+  if (p.length < 2 || n.length < 2) return false;
+  if (!NAME_ALLOWED.test(p) || !NAME_ALLOWED.test(n)) return false; // chiffres / symboles
+  const pl = p.toLowerCase(), nl = n.toLowerCase();
+  if (pl === nl) return false;                                   // "To To", "Das Das"
+  if (NAME_BLOCKLIST.has(pl) || NAME_BLOCKLIST.has(nl) || NAME_BLOCKLIST.has(pl + nl)) return false;
+  for (const tok of [p, n]) {
+    const core = tok.replace(/[ .'’-]/g, "");
+    if (/^(.)\1+$/i.test(core)) return false;                    // "Xx", "Hh", "jjjj"
+    if (core.length >= 3 && !NAME_VOWELS.test(core)) return false; // "wsg", "Xdfh" (mash de consonnes, 3+)
+  }
+  return true;
 }
 
 // Petit utilitaire de formatage EUR pour les params du template
@@ -49,15 +107,12 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
-
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Méthode non autorisée" });
   }
-
   const {
     email,
     prenom,
@@ -83,11 +138,29 @@ export default async function handler(req, res) {
   if (!email || !emailRegex.test(email)) {
     return res.status(400).json({ error: "invalid_format", message: "Email invalide" });
   }
-
   if (isDisposableEmail(email)) {
     return res.status(400).json({
       error: "disposable",
       message: "Merci d'utiliser une adresse email personnelle (Gmail, Outlook, etc.). Les emails jetables ne sont pas acceptés.",
+    });
+  }
+
+  // Nom plausible (permissif) — rejet loggé pour analyse ultérieure
+  if (!looksLikeRealName(prenom, nom)) {
+    console.warn("[lead rejeté] nom invalide:", JSON.stringify({ prenom, nom, email }));
+    return res.status(400).json({
+      error: "invalid_name",
+      message: "Merci d'indiquer votre vrai prénom et nom.",
+    });
+  }
+
+  // Domaine email réel (fail-open) — rejet loggé pour analyse ultérieure
+  const domainOk = await isRealEmailDomain(email);
+  if (!domainOk) {
+    console.warn("[lead rejeté] domaine inexistant:", email);
+    return res.status(400).json({
+      error: "invalid_domain",
+      message: "Cette adresse email ne semble pas valide. Vérifiez le domaine (ex : gmail.com, outlook.fr).",
     });
   }
 
@@ -96,17 +169,14 @@ export default async function handler(req, res) {
   const LIST_ID_SIMULATEUR = 3;
   const LIST_ID_NEWSLETTER = 4;
   const TEMPLATE_ID = 1;
-
   if (!BREVO_API_KEY) {
     console.error("BREVO_API_KEY manquante dans les env vars Vercel");
     return res.status(500).json({ error: "Configuration serveur invalide" });
   }
-
   const listIds = [LIST_ID_SIMULATEUR];
   if (newsletter_optin === true) {
     listIds.push(LIST_ID_NEWSLETTER);
   }
-
   // Libellés lisibles pour le template
   const santeLabel = sante_type === "lamal" ? "LAMal (assurance suisse)"
                    : sante_type === "cmu" ? "CMU (assurance française)" : "—";
@@ -128,7 +198,6 @@ export default async function handler(req, res) {
       santeConseil = "Dans ton cas, LAMal et CMU sont à un niveau comparable.";
     }
   }
-
   // Sync Raph Brain DB (non-bloquant)
   fetch(RAPH_BRAIN_URL, {
     method: "POST",
@@ -148,7 +217,6 @@ export default async function handler(req, res) {
       source: "simulateur",
     }),
   }).catch(() => {});
-
   try {
     const contactRes = await fetch("https://api.brevo.com/v3/contacts", {
       method: "POST",
@@ -171,12 +239,10 @@ export default async function handler(req, res) {
         updateEnabled: true,
       }),
     });
-
     if (!contactRes.ok && contactRes.status !== 204) {
       const errText = await contactRes.text();
       console.error("Erreur création contact Brevo:", contactRes.status, errText);
     }
-
     const emailRes = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
@@ -207,18 +273,15 @@ export default async function handler(req, res) {
         },
       }),
     });
-
     if (!emailRes.ok) {
       const errText = await emailRes.text();
       console.error("Erreur envoi email Brevo:", emailRes.status, errText);
       return res.status(500).json({ error: "Erreur lors de l'envoi de l'email" });
     }
-
     return res.status(200).json({
       success: true,
       message: "Email envoyé avec succès",
     });
-
   } catch (err) {
     console.error("Erreur serveur:", err);
     return res.status(500).json({ error: "Une erreur est survenue" });
